@@ -20,7 +20,7 @@ def constfn(val):
 def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-            save_interval=0, load_path=None, model_fn=None, **network_kwargs):
+            save_interval=0, load_path=None, model_fn=None, tb_logger=None, **network_kwargs):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
 
@@ -116,9 +116,9 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
         ckpt.restore(manager.latest_checkpoint)
 
     # Instantiate the runner object
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
+    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam, tb_logger=tb_logger)
     if eval_env is not None:
-        eval_runner = Runner(env = eval_env, model = model, nsteps = nsteps, gamma = gamma, lam= lam)
+        eval_runner = Runner(env=eval_env, model=model, nsteps=nsteps, gamma=gamma, lam=lam, tb_logger=tb_logger)
 
     epinfobuf = deque(maxlen=100)
     if eval_env is not None:
@@ -140,9 +140,9 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
         if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
 
         # Get minibatch
-        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run() #pylint: disable=E0632
+        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run(update) #pylint: disable=E0632
         if eval_env is not None:
-            eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run() #pylint: disable=E0632
+            eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run(update) #pylint: disable=E0632
 
         epinfobuf.extend(epinfos)
         if eval_env is not None:
@@ -176,6 +176,7 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
             # Calculates if value function is a good predicator of the returns (ev > 1)
             # or if it's just worse than predicting nothing (ev =< 0)
             ev = explained_variance(values, returns)
+
             logger.logkv("misc/serial_timesteps", update*nsteps)
             logger.logkv("misc/nupdates", update)
             logger.logkv("misc/total_timesteps", update*nbatch)
@@ -191,6 +192,18 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
                 logger.logkv('loss/' + lossname, lossval)
 
             logger.dumpkvs()
+
+            # Using my own logger here. Got rid of a few of those KPIs tho
+            tb_logger.log_kv("ppo_fps", fps, update)
+            tb_logger.log_kv("ppo_misc/explained_variance", float(ev), update)
+            tb_logger.log_kv('ppo_eprewmean', safemean([epinfo['r'] for epinfo in epinfobuf]), update)
+            tb_logger.log_kv('ppo_eplenmean', safemean([epinfo['l'] for epinfo in epinfobuf]), update)
+            if eval_env is not None:
+                tb_logger.log_kv('ppo_eval_eprewmean', safemean([epinfo['r'] for epinfo in eval_epinfobuf]), update)
+                tb_logger.log_kv('ppo_eval_eplenmean', safemean([epinfo['l'] for epinfo in eval_epinfobuf]), update)
+            tb_logger.log_kv('ppo_misc/time_elapsed', tnow - tfirststart, update)
+            for (lossval, lossname) in zip(lossvals, model.loss_names):
+                tb_logger.log_kv('ppo_loss/' + lossname, lossval, update)
 
     return model
 
