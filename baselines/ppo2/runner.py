@@ -23,6 +23,7 @@ class Runner(AbstractEnvRunner):
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [],[],[],[],[],[]
         mb_states = self.states
         epinfos = []
+        self.obs[:] = self.env.reset()  # TODO instance01
         # For n in range number of steps
         for _ in range(self.nsteps):
             # Given observations, get action value and neglopacs
@@ -66,8 +67,8 @@ class Runner(AbstractEnvRunner):
                 nextvalues = mb_values[t+1]
             delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal - mb_values[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
-        mb_returns = mb_advs + mb_values
-        return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
+        mb_returns = mb_advs.reshape(-1, 1) + mb_values
+        return (*map(sf01, (mb_obs, mb_returns, mb_dones.reshape(-1, 1), mb_actions, mb_values, mb_neglogpacs)),
             mb_states, epinfos)
 
 
