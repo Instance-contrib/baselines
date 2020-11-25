@@ -1,3 +1,4 @@
+import os
 import tensorflow as tf
 from baselines.common.policies import PolicyWithValue
 
@@ -50,6 +51,11 @@ class Model(tf.Module):
 
         return pg_loss, vf_loss, entropy, approxkl, clipfrac
 
+    def save(self, fname):
+        tf.saved_model.save(self, fname)
+
+    def load(self, fname):
+        tf.saved_model.load(fname)
 
     @tf.function
     def get_grad(self, cliprange, obs, returns, masks, actions, values, neglogpac_old):

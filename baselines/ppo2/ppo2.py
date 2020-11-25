@@ -20,7 +20,7 @@ def constfn(val):
 def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
-            save_interval=0, load_path=None, model_fn=None, tb_logger=None, **network_kwargs):
+            save_interval=0, load_path=None, model_fn=None, tb_logger=None, evaluator=None, **network_kwargs):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
 
@@ -108,6 +108,8 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
 
     model = model_fn(ac_space=ac_space, policy_network=network, ent_coef=ent_coef, vf_coef=vf_coef,
                      max_grad_norm=max_grad_norm)
+
+    env.model = model
 
     if load_path is not None:
         load_path = osp.expanduser(load_path)
@@ -204,6 +206,9 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
             tb_logger.log_kv('ppo_misc/time_elapsed', tnow - tfirststart, update)
             for (lossval, lossname) in zip(lossvals, model.loss_names):
                 tb_logger.log_kv('ppo_loss/' + lossname, lossval, update)
+
+            # if evaluator:
+            #     evaluator(model, update)
 
     return model
 
