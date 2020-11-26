@@ -55,7 +55,8 @@ class Model(tf.Module):
         tf.saved_model.save(self, fname)
 
     def load(self, fname):
-        tf.saved_model.load(fname)
+        self.loaded_model = tf.saved_model.load(fname)
+        self.step = self.loaded_model.step
 
     @tf.function
     def get_grad(self, cliprange, obs, returns, masks, actions, values, neglogpac_old):
