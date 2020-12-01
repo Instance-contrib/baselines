@@ -11,15 +11,21 @@ class Runner(AbstractEnvRunner):
     run():
     - Make a mini batch
     """
-    def __init__(self, *, env, model, nsteps, gamma, lam, tb_logger):
+    def __init__(self, *, env, model, nsteps, gamma, lam, tb_logger, schedule_gamma, schedule_gamma_after, schedule_gamma_value):
         super().__init__(env=env, model=model, nsteps=nsteps)
         # Lambda used in GAE (General Advantage Estimation)
         self.lam = lam
         # Discount rate
         self.gamma = gamma
+        self.schedule_gamma = schedule_gamma
+        self.schedule_gamma_after = schedule_gamma_after
+        self.schedule_gamma_value = schedule_gamma_value
         self.tb_logger = tb_logger
 
     def run(self, n_episode):
+        if self.schedule_gamma and n_episode >= self.schedule_gamma_after:
+            self.gamma = self.schedule_gamma_value
+
         # Here, we init the lists that will contain the mb of experiences
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [],[],[],[],[],[]
         mb_states = self.states
