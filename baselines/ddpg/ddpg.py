@@ -44,6 +44,9 @@ def learn(network, env,
           eval_env=None,
           param_noise_adaption_interval=50,
           load_path=None,
+          tb_logger=None,
+          evaluator=None,
+          model_fname=None,
           **network_kwargs):
 
     set_global_seeds(seed)
@@ -96,6 +99,8 @@ def learn(network, env,
     logger.info('Using agent with the following configuration:')
     logger.info(str(agent.__dict__.items()))
 
+    env.model = agent
+
     if load_path is not None:
         load_path = osp.expanduser(load_path)
         ckpt = tf.train.Checkpoint(model=agent)
@@ -139,6 +144,9 @@ def learn(network, env,
                 # if simulating multiple envs in parallel, impossible to reset agent at the end of the episode in each
                 # of the environments, so resetting here instead
                 agent.reset()
+            obs = env.reset()
+            obs = tf.cast(obs, tf.float32)
+            obs = tf.reshape(obs, shape=(1, -1))
             for t_rollout in range(nb_rollout_steps):
                 # Predict next action.
                 action, q, _, _ = agent.step(tf.constant(obs), apply_noise=True, compute_Q=True)
@@ -149,7 +157,13 @@ def learn(network, env,
                     env.render()
 
                 # max_action is of dimension A, whereas action is dimension (nenvs, A) - the multiplication gets broadcasted to the batch
-                new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                new_obs, r, done, info = env.step(max_action * action)  # Scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                new_obs = tf.cast(new_obs, tf.float32)
+                new_obs = tf.reshape(new_obs, shape=(1, -1))
+
+                r = np.array([r])
+                done = np.array([done])
+
                 # note these outputs are batched from vecenv
 
                 t += 1
@@ -161,12 +175,12 @@ def learn(network, env,
                 # Book-keeping.
                 epoch_actions.append(action)
                 epoch_qs.append(q)
-                agent.store_transition(obs, action, r, new_obs, done) #the batched data will be unrolled in memory.py's append.
+                agent.store_transition(obs, action, r, new_obs, done)  # The batched data will be unrolled in memory.py's append.
 
                 obs = new_obs
 
                 for d in range(len(done)):
-                    if done[d]:
+                    if done[d] or t_rollout == nb_rollout_steps - 1:
                         # Episode done.
                         epoch_episode_rewards.append(episode_reward[d])
                         episode_rewards_history.append(episode_reward[d])
@@ -241,6 +255,31 @@ def learn(network, env,
         combined_stats['total/episodes'] = episodes
         combined_stats['rollout/episodes'] = epoch_episodes
         combined_stats['rollout/actions_std'] = np.std(epoch_actions)
+
+        # My own shit
+        tb_logger.log_kv("ddpg_return/mean", np.mean(epoch_episode_rewards), epoch)
+        tb_logger.log_kv("ddpg_return/std", np.std(epoch_episode_rewards), epoch)
+        tb_logger.log_kv("ddpg_return/history_mean", np.mean(episode_rewards_history), epoch)
+        tb_logger.log_kv("ddpg_return/history_std", np.std(episode_rewards_history), epoch)
+        tb_logger.log_kv("ddpg_actions/mean", np.mean(epoch_actions), epoch)
+        tb_logger.log_kv("ddpg_actions/std", np.std(epoch_actions), epoch)
+        tb_logger.log_kv("ddpg_loss/actor", np.mean(epoch_actor_losses), epoch)
+        tb_logger.log_kv("ddpg_loss/critic", np.mean(epoch_critic_losses), epoch)
+        tb_logger.log_kv("ddpg_other/Q_mean", np.mean(epoch_qs), epoch)
+        tb_logger.log_kv("ddpg_other/param_noise_distance", np.mean(epoch_adaptive_distances), epoch)
+        tb_logger.log_kv("ddpg_other/episode_steps", np.mean(epoch_episode_steps), epoch)
+
+        if 'obs_rms_std' in stats:
+            tb_logger.log_kv("ddpg_other/obs_rms_mean", stats['obs_rms_mean'], epoch)
+            tb_logger.log_kv("ddpg_other/obs_rms_std", stats['obs_rms_std'], epoch)
+        tb_logger.log_kv("ddpg_reference/Q_mean", stats['reference_Q_mean'], epoch)
+        tb_logger.log_kv("ddpg_reference/Q_std", stats['reference_Q_std'], epoch)
+        tb_logger.log_kv("ddpg_reference/actor_Q_mean", stats['reference_actor_Q_mean'], epoch)
+        tb_logger.log_kv("ddpg_reference/actor_Q_std", stats['reference_actor_Q_std'], epoch)
+        tb_logger.log_kv("ddpg_reference/action_mean", stats['reference_action_mean'], epoch)
+        tb_logger.log_kv("ddpg_reference/action_std", stats['reference_action_std'], epoch)
+
+
         # Evaluation statistics.
         if eval_env is not None:
             combined_stats['eval/return'] = eval_episode_rewards

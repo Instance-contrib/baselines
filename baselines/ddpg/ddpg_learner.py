@@ -35,9 +35,9 @@ def reduce_var(x, axis=None, keepdims=False):
 
 @tf.function
 def update_perturbed_actor(actor, perturbed_actor, param_noise_stddev):
-
+    names = [a.name for a in actor.perturbable_vars]
     for var, perturbed_var in zip(actor.variables, perturbed_actor.variables):
-        if var in actor.perturbable_vars:
+        if var.name in names:
             perturbed_var.assign(var + tf.random.normal(shape=tf.shape(var), mean=0., stddev=param_noise_stddev))
         else:
             perturbed_var.assign(var)
@@ -129,13 +129,14 @@ class DDPG(tf.Module):
 
         if self.param_noise:
             logger.info('setting up param noise')
+            names = [a.name for a in actor.perturbable_vars]
             for var, perturbed_var in zip(self.actor.variables, self.perturbed_actor.variables):
-                if var in actor.perturbable_vars:
+                if var.name in names:
                     logger.info('  {} <- {} + noise'.format(perturbed_var.name, var.name))
                 else:
                     logger.info('  {} <- {}'.format(perturbed_var.name, var.name))
             for var, perturbed_var in zip(self.actor.variables, self.perturbed_adaptive_actor.variables):
-                if var in actor.perturbable_vars:
+                if var.name in names:
                     logger.info('  {} <- {} + noise'.format(perturbed_var.name, var.name))
                 else:
                     logger.info('  {} <- {}'.format(perturbed_var.name, var.name))
@@ -188,7 +189,8 @@ class DDPG(tf.Module):
         return action, q, None, None
 
     def store_transition(self, obs0, action, reward, obs1, terminal1):
-        reward *= self.reward_scale
+        # reward *= self.reward_scale
+        reward = (reward * self.reward_scale)
 
         B = obs0.shape[0]
         for b in range(B):
