@@ -21,7 +21,7 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
             log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
             save_interval=0, load_path=None, model_fn=None, tb_logger=None, evaluator=None, model_fname=None,
-            schedule_gamma=False, schedule_gamma_after=4000, schedule_gamme_value=0.999, **network_kwargs):
+            schedule_gamma=False, schedule_gamma_after=4000, schedule_gamma_value=0.999, **network_kwargs):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
 
@@ -120,13 +120,13 @@ def learn(*, network, env, total_timesteps, eval_env = None, seed=None, nsteps=2
 
     # Instantiate the runner object
     runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam,
-            tb_logger=tb_logger, schedule_gamma=False,
-            schedule_gamma_after=4000, schedule_gamma_value=0.999)
+            tb_logger=tb_logger, schedule_gamma=schedule_gamma,
+            schedule_gamma_after=schedule_gamma_after, schedule_gamma_value=schedule_gamma_value)
     if eval_env is not None:
         eval_runner = Runner(env=eval_env, model=model, nsteps=nsteps,
                 gamma=gamma, lam=lam,
-                tb_logger=tb_logger, schedule_gamma=False,
-                schedule_gamma_after=4000, schedule_gamma_value=0.999)
+                tb_logger=tb_logger, schedule_gamma=schedule_gamma,
+                schedule_gamma_after=schedule_gamma_after, schedule_gamma_value=schedule_gamma_value)
 
     epinfobuf = deque(maxlen=100)
     if eval_env is not None:
