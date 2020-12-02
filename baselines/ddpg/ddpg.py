@@ -192,6 +192,8 @@ def learn(network, env,
                         if nenvs == 1:
                             agent.reset()
 
+                        tb_logger.log_summary(env, epoch_episode_rewards, epoch * nb_epoch_cycles + cycle)
+
 
             # Train.
             epoch_actor_losses = []

@@ -11,7 +11,7 @@ class Runner(AbstractEnvRunner):
     run():
     - Make a mini batch
     """
-    def __init__(self, *, env, model, nsteps, gamma, lam, tb_logger, schedule_gamma, schedule_gamma_after, schedule_gamma_value):
+    def __init__(self, *, env, model, nsteps, gamma, lam, tb_logger, after_epoch_cb, schedule_gamma, schedule_gamma_after, schedule_gamma_value):
         super().__init__(env=env, model=model, nsteps=nsteps)
         # Lambda used in GAE (General Advantage Estimation)
         self.lam = lam
@@ -21,6 +21,7 @@ class Runner(AbstractEnvRunner):
         self.schedule_gamma_after = schedule_gamma_after
         self.schedule_gamma_value = schedule_gamma_value
         self.tb_logger = tb_logger
+        self.after_epoch_cb = after_epoch_cb
 
     def run(self, n_episode):
         if self.schedule_gamma and n_episode >= self.schedule_gamma_after:
@@ -54,6 +55,7 @@ class Runner(AbstractEnvRunner):
 
         if self.tb_logger:
             self.tb_logger.log_summary(self.env, mb_rewards, n_episode)
+            self.after_epoch_cb(n_episode)
 
         #batch of steps to batch of rollouts
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
