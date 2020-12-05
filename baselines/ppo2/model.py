@@ -1,4 +1,3 @@
-import os
 import tensorflow as tf
 from baselines.common.policies import PolicyWithValue
 
@@ -57,6 +56,7 @@ class Model(tf.Module):
     def load(self, fname):
         self.loaded_model = tf.saved_model.load(fname)
         self.step = self.loaded_model.step
+        self.value = self.loaded_model.value
 
     @tf.function
     def get_grad(self, cliprange, obs, returns, masks, actions, values, neglogpac_old):

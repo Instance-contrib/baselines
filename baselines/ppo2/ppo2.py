@@ -216,7 +216,7 @@ def learn(
             for (lossval, lossname) in zip(lossvals, model.loss_names):
                 tb_logger.log_kv('ppo_loss/' + lossname, lossval, update)
 
-            if update % 1000 == 0:
+            if update % 1000 == 0 or update == 1:
                 model.save(model_fname + '-' + str(update // 1000))
 
             # if evaluator:
