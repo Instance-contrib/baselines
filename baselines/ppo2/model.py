@@ -52,12 +52,24 @@ class Model(tf.Module):
 
     def save(self, fname):
         self.trainable_variables_bak = self.train_model.trainable_variables
+        self.initial_state_bak = self.train_model.initial_state
         tf.saved_model.save(self, fname)
 
     def load(self, fname):
         self.loaded_model = tf.saved_model.load(fname)
         self.step = self.loaded_model.step
         self.value = self.loaded_model.value
+        if hasattr(self.loaded_model, 'trainable_variables_bak'):
+            self.loaded_model.train_model.trainable_variables = self.loaded_model.trainable_variables_bak
+        else:
+            self.loaded_model.train_model.trainable_variables = None
+        if hasattr(self.loaded_model, 'initial_state_bak'):
+            self.loaded_model.train_model.initial_state = self.loaded_model.initial_state_bak
+            self.loaded_model.initial_state = self.loaded_model.initial_state_bak
+        else:
+            self.loaded_model.train_model.initial_state = None
+            self.loaded_model.initial_state = None
+        return self.loaded_model
 
     @tf.function
     def get_grad(self, cliprange, obs, returns, masks, actions, values, neglogpac_old):
