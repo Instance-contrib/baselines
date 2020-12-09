@@ -1,9 +1,7 @@
 import time
 import numpy as np
 import tensorflow as tf
-import os.path as osp
 from baselines import logger
-from collections import deque
 from baselines.common import explained_variance, set_global_seeds
 from baselines.common.models import get_network_builder
 try:
@@ -109,30 +107,21 @@ def learn(
         from baselines.ppo2.model import Model
         model_fn = Model
 
-    model = model_fn(ac_space=ac_space, policy_network=network, ent_coef=ent_coef, vf_coef=vf_coef,
+    model1 = model_fn(ac_space=ac_space, policy_network=network, ent_coef=ent_coef, vf_coef=vf_coef,
+                     max_grad_norm=max_grad_norm)
+    model2 = model_fn(ac_space=ac_space, policy_network=network, ent_coef=ent_coef, vf_coef=vf_coef,
                      max_grad_norm=max_grad_norm)
 
-    env.model = model
-
-    if load_path is not None:
-        load_path = osp.expanduser(load_path)
-        ckpt = tf.train.Checkpoint(model=model)
-        manager = tf.train.CheckpointManager(ckpt, load_path, max_to_keep=None)
-        ckpt.restore(manager.latest_checkpoint)
+    env.model1 = model1
+    env.model2 = model2
 
     # Instantiate the runner object
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam,
+    runner1 = Runner(env=env, model=model1, nsteps=nsteps, gamma=gamma, lam=lam,
             tb_logger=tb_logger, after_epoch_cb=after_epoch_cb, schedule_gamma=schedule_gamma,
-            schedule_gamma_after=schedule_gamma_after, schedule_gamma_value=schedule_gamma_value)
-    if eval_env is not None:
-        eval_runner = Runner(env=eval_env, model=model, nsteps=nsteps,
-                gamma=gamma, lam=lam,
-                tb_logger=tb_logger, after_epoch_cb=after_epoch_cb, schedule_gamma=schedule_gamma,
-                schedule_gamma_after=schedule_gamma_after, schedule_gamma_value=schedule_gamma_value)
-
-    epinfobuf = deque(maxlen=100)
-    if eval_env is not None:
-        eval_epinfobuf = deque(maxlen=100)
+            schedule_gamma_after=schedule_gamma_after, schedule_gamma_value=schedule_gamma_value, model_id='m1')
+    runner2 = Runner(env=env, model=model2, nsteps=nsteps, gamma=gamma, lam=lam,
+            tb_logger=tb_logger, after_epoch_cb=after_epoch_cb, schedule_gamma=schedule_gamma,
+            schedule_gamma_after=schedule_gamma_after, schedule_gamma_value=schedule_gamma_value, model_id='m2')
 
     # Start total timer
     tfirststart = time.perf_counter()
@@ -149,81 +138,104 @@ def learn(
 
         if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
 
-        # Get minibatch
-        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run(update) #pylint: disable=E0632
-        if eval_env is not None:
-            eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run(update) #pylint: disable=E0632
+        # Get minibatch.
+        obs1, returns1, masks1, actions1, values1, neglogpacs1, states1, _ = runner1.run(update)
+        obs2, returns2, masks2, actions2, values2, neglogpacs2, states2, _ = runner2.run(update)
 
-        epinfobuf.extend(epinfos)
-        if eval_env is not None:
-            eval_epinfobuf.extend(eval_epinfos)
-
-        # Here what we're going to do is for each minibatch calculate the loss and append it.
-        mblossvals = []
-        if states is None: # nonrecurrent version
-            # Index of each element of batch_size
-            # Create the indices array
-            inds = np.arange(nbatch)
-            for _ in range(noptepochs):
-                # Randomize the indexes
-                np.random.shuffle(inds)
-                # 0 to batch_size with batch_train_size step
-                for start in range(0, nbatch, nbatch_train):
-                    end = start + nbatch_train
-                    mbinds = inds[start:end]
-                    slices = (tf.constant(arr[mbinds]) for arr in (obs, returns, masks, actions, values, neglogpacs))
-                    mblossvals.append(model.train(lrnow, cliprangenow, *slices))
-        else: # recurrent version
-            raise ValueError('Not Support Yet')
+        # For each minibatch calculate the loss and append it.
+        mblossvals1 = get_mblossvals(nbatch, noptepochs, nbatch_train, lrnow,
+            cliprangenow, model1, obs1, returns1, masks1, actions1, values1,
+            neglogpacs1, states1)
+        mblossvals2 = get_mblossvals(nbatch, noptepochs, nbatch_train, lrnow,
+            cliprangenow, model2, obs2, returns2, masks2, actions2, values2,
+            neglogpacs2, states2)
 
         # Feedforward --> get losses --> update
-        lossvals = np.mean(mblossvals, axis=0)
+        lossvals1 = np.mean(mblossvals1, axis=0)
+        lossvals2 = np.mean(mblossvals2, axis=0)
+
         # End timer
         tnow = time.perf_counter()
+
         # Calculate the fps (frame per second)
         fps = int(nbatch / (tnow - tstart))
         if update % log_interval == 0 or update == 1:
-            # Calculates if value function is a good predicator of the returns (ev > 1)
-            # or if it's just worse than predicting nothing (ev =< 0)
-            ev = explained_variance(values, returns)
-
-            logger.logkv("misc/serial_timesteps", update*nsteps)
-            logger.logkv("misc/nupdates", update)
-            logger.logkv("misc/total_timesteps", update*nbatch)
-            logger.logkv("fps", fps)
-            logger.logkv("misc/explained_variance", float(ev))
-            logger.logkv('eprewmean', safemean([epinfo['r'] for epinfo in epinfobuf]))
-            logger.logkv('eplenmean', safemean([epinfo['l'] for epinfo in epinfobuf]))
-            if eval_env is not None:
-                logger.logkv('eval_eprewmean', safemean([epinfo['r'] for epinfo in eval_epinfobuf]) )
-                logger.logkv('eval_eplenmean', safemean([epinfo['l'] for epinfo in eval_epinfobuf]) )
-            logger.logkv('misc/time_elapsed', tnow - tfirststart)
-            for (lossval, lossname) in zip(lossvals, model.loss_names):
-                logger.logkv('loss/' + lossname, lossval)
-
-            logger.dumpkvs()
-
-            # Using my own logger here. Got rid of a few of those KPIs tho
-            tb_logger.log_kv("ppo_fps", fps, update)
-            tb_logger.log_kv("ppo_misc/explained_variance", float(ev), update)
-            tb_logger.log_kv('ppo_eprewmean', safemean([epinfo['r'] for epinfo in epinfobuf]), update)
-            tb_logger.log_kv('ppo_eplenmean', safemean([epinfo['l'] for epinfo in epinfobuf]), update)
-            if eval_env is not None:
-                tb_logger.log_kv('ppo_eval_eprewmean', safemean([epinfo['r'] for epinfo in eval_epinfobuf]), update)
-                tb_logger.log_kv('ppo_eval_eplenmean', safemean([epinfo['l'] for epinfo in eval_epinfobuf]), update)
-            tb_logger.log_kv('ppo_misc/time_elapsed', tnow - tfirststart, update)
-            for (lossval, lossname) in zip(lossvals, model.loss_names):
-                tb_logger.log_kv('ppo_loss/' + lossname, lossval, update)
+            log(
+                'm1', logger, tb_logger, values1, returns1, update, nsteps,
+                nbatch, fps, lossvals1, model1, tnow, tfirststart
+            )
+            log(
+                'm2', logger, tb_logger, values2, returns2, update, nsteps,
+                nbatch, fps, lossvals2, model2, tnow, tfirststart
+            )
 
             if update % 1000 == 0 or update == 1:
-                model.save(model_fname + '-' + str(update // 1000))
+                model1.save(model_fname + '-' + str(update // 1000) + '-m1')
+                model2.save(model_fname + '-' + str(update // 1000) + '-m2')
 
-            # if evaluator:
-            #     evaluator(model, update)
-
-    return model
+    return model1, model2
 
 
-# Avoid division error when calculate the mean (in our case if epinfo is empty returns np.nan, not return an error)
+def log(
+        model_identifier, logger, tb_logger, values, returns, update, nsteps,
+        nbatch, fps, lossvals, model, tnow, tfirststart):
+    # Calculates if value function is a good predicator of the returns (ev > 1)
+    # or if it's just worse than predicting nothing (ev =< 0)
+    ev = explained_variance(values, returns)
+
+    misc_key = 'misc_' + model_identifier
+    fps_key = 'fps_' + model_identifier
+    loss_key = 'loss_' + model_identifier
+
+    logger.logkv(misc_key + "/serial_timesteps", update*nsteps)
+    logger.logkv(misc_key + "/nupdates", update)
+    logger.logkv(misc_key + "/total_timesteps", update*nbatch)
+    logger.logkv(fps_key, fps)
+    logger.logkv(misc_key + "/explained_variance", float(ev))
+    logger.logkv(misc_key + "/time_elapsed", tnow - tfirststart)
+    for (lossval, lossname) in zip(lossvals, model.loss_names):
+        logger.logkv(loss_key + '/' + lossname, lossval)
+
+    logger.dumpkvs()
+
+    misc_key = 'ppo_misc_' + model_identifier
+    fps_key = 'ppo_fps_' + model_identifier
+    loss_key = 'ppo_loss_' + model_identifier
+
+    # Using my own logger here. Got rid of a few of those KPIs tho
+    tb_logger.log_kv(fps_key, fps, update)
+    tb_logger.log_kv(misc_key + "/explained_variance", float(ev), update)
+    tb_logger.log_kv(misc_key + "/time_elapsed", tnow - tfirststart, update)
+    for (lossval, lossname) in zip(lossvals, model.loss_names):
+        tb_logger.log_kv(loss_key + '/' + lossname, lossval, update)
+
+
+def get_mblossvals(
+        nbatch, noptepochs, nbatch_train, lrnow, cliprangenow, model,
+        obs, returns, masks, actions, values, neglogpacs, states):
+    mblossvals = []
+    if states is None: # nonrecurrent version
+        # Index of each element of batch_size
+        # Create the indices array
+        inds = np.arange(nbatch)
+        for _ in range(noptepochs):
+            # Randomize the indexes
+            np.random.shuffle(inds)
+            # 0 to batch_size with batch_train_size step
+            for start in range(0, nbatch, nbatch_train):
+                end = start + nbatch_train
+                mbinds = inds[start:end]
+                slices = (
+                    tf.constant(arr[mbinds])
+                    for arr in (obs, returns, masks, actions, values, neglogpacs)
+                )
+                mblossvals.append(model.train(lrnow, cliprangenow, *slices))
+    else: # recurrent version
+        raise ValueError('Not Support Yet')
+    return mblossvals
+
+
+# Avoid division error when calculate the mean (in our case if epinfo is empty
+# returns np.nan, not return an error)
 def safemean(xs):
     return np.nan if len(xs) == 0 else np.mean(xs)

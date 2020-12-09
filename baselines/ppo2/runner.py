@@ -11,8 +11,9 @@ class Runner(AbstractEnvRunner):
     run():
     - Make a mini batch
     """
-    def __init__(self, *, env, model, nsteps, gamma, lam, tb_logger, after_epoch_cb, schedule_gamma, schedule_gamma_after, schedule_gamma_value):
+    def __init__(self, *, env, model, nsteps, gamma, lam, tb_logger, after_epoch_cb, schedule_gamma, schedule_gamma_after, schedule_gamma_value, model_id=None):
         super().__init__(env=env, model=model, nsteps=nsteps)
+        self.model_id = model_id
         # Lambda used in GAE (General Advantage Estimation)
         self.lam = lam
         # Discount rate
@@ -47,7 +48,7 @@ class Runner(AbstractEnvRunner):
 
             # Take actions in env and look the results
             # Infos contains a ton of useful informations
-            self.obs[:], rewards, self.dones, infos = self.env.step(actions)
+            self.obs[:], rewards, self.dones, infos = self.env.step(actions, model_id=self.model_id)
             for info in infos:
                 maybeepinfo = info.get('episode')
                 if maybeepinfo: epinfos.append(maybeepinfo)

@@ -51,6 +51,7 @@ class Model(tf.Module):
         return pg_loss, vf_loss, entropy, approxkl, clipfrac
 
     def save(self, fname):
+        self.trainable_variables_bak = self.train_model.trainable_variables
         tf.saved_model.save(self, fname)
 
     def load(self, fname):
