@@ -173,6 +173,9 @@ def learn(
                 model1.save(model_fname + '-' + str(update // 1000) + '-m1')
                 model2.save(model_fname + '-' + str(update // 1000) + '-m2')
 
+            if update % 1000 == 0 and evaluator:
+                evaluator(env.model1, update)
+
     return model1, model2
 
 

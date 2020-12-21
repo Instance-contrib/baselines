@@ -225,8 +225,8 @@ def learn(
             if update % 1000 == 0 or update == 1:
                 model.save(model_fname + '-' + str(update // 1000))
 
-            # if evaluator:
-            #     evaluator(model, update)
+            if update % 1000 == 0 and evaluator:
+                evaluator(model, update)
 
     return model
 
