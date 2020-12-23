@@ -194,7 +194,7 @@ def learn(
                     models[i].save(fname)
 
                 if update % 1000 == 0 and evaluator:
-                    evaluator(env.models[i], update)
+                    evaluator(models[i], update)
 
     return models
 
